@@ -1,5 +1,6 @@
 // src/logic.js
 import { askGemini } from "./Gemini";
+import { marked } from "marked"; // ✅ import marked
 
 // Create a utility function for localStorage with error handling
 const LS = {
@@ -42,16 +43,32 @@ const formatTime = (seconds) => {
   return `${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
 };
 
+// -------- Speech Function --------
+function speak(text) {
+  if ("speechSynthesis" in window) {
+    window.speechSynthesis.cancel(); // stop old speech
+
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = "en-US";
+    utterance.rate = 1;
+    utterance.pitch = 1;
+
+    speechSynthesis.speak(utterance);
+
+    LS.set("lastAI", text);
+  } else {
+    console.warn("Speech Synthesis not supported in this browser.");
+  }
+}
+
 // Initialize the dashboard functionality
 export function initDashboard() {
   const $ = (selector) => document.querySelector(selector);
-  
-  // Initialize quotes
+
+  // ---------------- Quotes ----------------
   const qEl = $("#quote");
   if (qEl) {
     qEl.textContent = LS.get("quote", randomQuote());
-    
-    // Add event listener for quote refresh
     $("#quote-refresh")?.addEventListener("click", () => {
       const q = randomQuote();
       qEl.textContent = q;
@@ -62,11 +79,10 @@ export function initDashboard() {
   // ---------------- Mood Tracker ----------------
   const moodTodayEl = $("#mood-today");
   let todayMood = LS.get("mood", "None");
-  
+
   if (moodTodayEl) {
     moodTodayEl.textContent = todayMood;
-    
-    // Add event listeners to mood buttons
+
     document.querySelectorAll(".moods button").forEach((btn) => {
       btn.addEventListener("click", () => {
         todayMood = btn.dataset.mood;
@@ -74,21 +90,21 @@ export function initDashboard() {
         LS.set("mood", todayMood);
       });
     });
-    
-    // Mood AI Advice
+
     $("#mood-advice")?.addEventListener("click", async () => {
       const out = $("#mood-ai-out");
       if (!todayMood || todayMood === "None") {
         out.textContent = "Select a mood first.";
         return;
       }
-      out.textContent = "Thinking…";
+      out.innerHTML = "Thinking…";
       try {
         const text = await askGemini(
           `User mood: ${todayMood}. Short, practical tips (3-5 bullets) for productivity + wellbeing today.`,
           220
         );
-        out.innerHTML = text.replaceAll("\n", "<br>");
+        out.innerHTML = `<div class="ai-output">${marked.parse(text)}</div>`;
+        speak(text);
       } catch (e) {
         out.textContent = "Error: " + e.message;
       }
@@ -117,10 +133,10 @@ export function initDashboard() {
       todoList.appendChild(el);
     });
   };
-  
+
   if (todoList) {
     renderTodos();
-    
+
     $("#todo-add")?.addEventListener("click", () => {
       const txt = $("#todo-input").value.trim();
       const pr = $("#todo-priority").value;
@@ -131,7 +147,6 @@ export function initDashboard() {
       $("#todo-input").value = "";
     });
 
-    // AI Prioritize
     $("#todo-ai-prio")?.addEventListener("click", async () => {
       if (todos.length === 0) return;
       todoList.innerHTML = "AI reordering...";
@@ -143,18 +158,19 @@ export function initDashboard() {
           Reorder them from highest to lowest priority with reasons.`,
           250
         );
-        todoList.innerHTML = text.replaceAll("\n", "<br>");
+        todoList.innerHTML = `<div class="ai-output">${marked.parse(text)}</div>`;
+        speak(text);
       } catch (e) {
         todoList.innerHTML = "Error: " + e.message;
       }
     });
   }
 
-  // ---------------- Pomodoro Timer ----------------
+  // ---------------- Pomodoro ----------------
   const timerEl = $("#timer");
   if (timerEl) {
     timerEl.textContent = formatTime(timer);
-    
+
     $("#start")?.addEventListener("click", () => {
       if (interval) return;
       interval = setInterval(() => {
@@ -167,12 +183,12 @@ export function initDashboard() {
         }
       }, 1000);
     });
-    
+
     $("#pause")?.addEventListener("click", () => {
       clearInterval(interval);
       interval = null;
     });
-    
+
     $("#reset")?.addEventListener("click", () => {
       clearInterval(interval);
       interval = null;
@@ -184,7 +200,7 @@ export function initDashboard() {
   // ---------------- Habits ----------------
   const habitList = $("#habit-list");
   let habits = LS.get("habits", []);
-  
+
   const renderHabits = () => {
     if (!habitList) return;
     habitList.innerHTML = "";
@@ -200,10 +216,10 @@ export function initDashboard() {
       habitList.appendChild(el);
     });
   };
-  
+
   if (habitList) {
     renderHabits();
-    
+
     $("#habit-add")?.addEventListener("click", () => {
       const txt = $("#habit-input").value.trim();
       if (!txt) return;
@@ -220,7 +236,8 @@ export function initDashboard() {
           `Suggest 5 simple daily habits for productivity, health, and learning.`,
           180
         );
-        habitList.innerHTML = text.replaceAll("\n", "<br>");
+        habitList.innerHTML = `<div class="ai-output">${marked.parse(text)}</div>`;
+        speak(text);
       } catch (e) {
         habitList.innerHTML = "Error: " + e.message;
       }
@@ -232,7 +249,7 @@ export function initDashboard() {
   if (notesEl) {
     notesEl.value = LS.get("notes", "");
     notesEl.addEventListener("input", () => LS.set("notes", notesEl.value));
-    
+
     $("#plan-ai")?.addEventListener("click", async () => {
       const txt = notesEl.value;
       const out = $("#chat-out");
@@ -242,7 +259,8 @@ export function initDashboard() {
           `Here are my notes/goals: ${txt}. Create a structured action plan for today.`,
           250
         );
-        out.innerHTML = plan.replaceAll("\n", "<br>");
+        out.innerHTML = `<div class="ai-output">${marked.parse(plan)}</div>`;
+        speak(plan);
       } catch (e) {
         out.innerHTML = "Error: " + e.message;
       }
@@ -257,15 +275,24 @@ export function initDashboard() {
     out.innerHTML = "AI thinking…";
     try {
       const ans = await askGemini(q, 280);
-      out.innerHTML = `<b>You:</b> ${q}<br><b>AI:</b> ${ans.replaceAll(
-        "\n",
-        "<br>"
-      )}`;
+      out.innerHTML = `
+        <div class="ai-output">
+          <b>You:</b> ${q}<br><br>
+          <b>AI:</b> ${marked.parse(ans)}
+        </div>`;
+      speak(ans);
     } catch (e) {
       out.innerHTML = "Error: " + e.message;
     }
   });
+
+  // -------- Speak last AI output once on refresh --------
+  const lastAI = LS.get("lastAI", "");
+  if (lastAI) {
+    setTimeout(() => {
+      speak(lastAI);
+    }, 500);
+  }
 }
 
-// Remove the DOMContentLoaded event listener since we're calling initDashboard manually
 export default initDashboard;
